@@ -107,6 +107,7 @@ defmodule LiveSvelte do
         class={@class}
       >
         <style><%= raw(@ssr_render["css"]["code"]) %></style>
+        <%= raw(@ssr_render["head"]) %>
         <%= raw(@ssr_render["html"]) %>
       </div>
     </.live_json>

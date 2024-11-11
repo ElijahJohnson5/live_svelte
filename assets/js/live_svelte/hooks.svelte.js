@@ -1,4 +1,5 @@
 import {normalizeComponents} from "./utils"
+import {mount, hydrate, unmount} from "svelte"
 
 function getAttributeJson(ref, attributeName) {
     const data = ref.el.getAttribute(attributeName)
@@ -72,8 +73,7 @@ function getProps(ref) {
         ...getAttributeJson(ref, "data-props"),
         ...getLiveJsonProps(ref),
         live: ref,
-        $$slots: getSlots(ref),
-        $$scope: {},
+        // $$slots: getSlots(ref),
     }
 }
 
@@ -83,48 +83,45 @@ function findSlotCtx(component) {
     return component.$$.ctx.find(ctxElement => ctxElement?.default)
 }
 
+function update_state(ref) {
+    const newProps = getProps(ref)
+    for (const key in newProps) {
+        ref._instance.state[key] = newProps[key]
+    }
+}
+
 export function getHooks(components) {
     components = normalizeComponents(components)
 
     const SvelteHook = {
         mounted() {
+            let state = $state(getProps(this))
             const componentName = this.el.getAttribute("data-name")
-            if (!componentName) {
-                throw new Error("Component name must be provided")
-            }
+            if (!componentName) throw new Error("Component name must be provided")
 
             const Component = components[componentName]
-            if (!Component) {
-                throw new Error(`Unable to find ${componentName} component.`)
-            }
+            if (!Component) throw new Error(`Unable to find ${componentName} component.`)
 
             for (const liveJsonElement of Object.keys(getAttributeJson(this, "data-live-json"))) {
-                window.addEventListener(`${liveJsonElement}_initialized`, event => this._instance.$set(getProps(this)), false)
-                window.addEventListener(`${liveJsonElement}_patched`, event => this._instance.$set(getProps(this)), false)
+                window.addEventListener(`${liveJsonElement}_initialized`, _event => update_state(this), false)
+                window.addEventListener(`${liveJsonElement}_patched`, _event => update_state(this), false)
             }
 
-            this._instance = new Component({
+            const hydrateOrMount = this.el.hasAttribute("data-ssr") ? hydrate : mount
+
+            this._instance = hydrateOrMount(Component, {
                 target: this.el,
-                props: getProps(this),
-                hydrate: this.el.hasAttribute("data-ssr"),
+                props: state,
             })
+            this._instance.state = state
         },
 
         updated() {
-            // Set the props
-            this._instance.$set(getProps(this))
-
-            // Set the slots
-            const slotCtx = findSlotCtx(this._instance)
-            for (const key in slotCtx) {
-                slotCtx[key][0]().update()
-            }
+            update_state(this)
         },
 
         destroyed() {
-            if (this._instance) {
-                window.addEventListener("phx:page-loading-stop", () => this._instance.$destroy(), {once: true})
-            }
+            if (this._instance) window.addEventListener("phx:page-loading-stop", () => unmount(this._instance), {once: true})
         },
     }
 
